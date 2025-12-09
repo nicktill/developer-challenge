@@ -1,12 +1,22 @@
 import FireFly from "@hyperledger/firefly-sdk";
 import bodyparser from "body-parser";
 import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
 import simplestorage from "../../solidity/artifacts/contracts/simple_storage.sol/SimpleStorage.json";
 import token from "../../solidity/artifacts/contracts/Token.sol/Token.json";
 import assetLibrary from "../../solidity/artifacts/contracts/asset_storage.sol/AssetLibrary.json";
 import config from "./config.json";
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "http://localhost:4000",
+    methods: ["GET", "POST"]
+  }
+});
+
 const firefly = new FireFly({
   host: config.HOST,
   namespace: config.NAMESPACE,
@@ -512,7 +522,16 @@ async function init() {
       }
     });
 
-  // Simple event logging (FireFly handles WebSocket internally)
+  // Socket.IO connection handling
+  io.on('connection', (socket) => {
+    console.log(`Client connected: ${socket.id}`);
+    
+    socket.on('disconnect', () => {
+      console.log(`Client disconnected: ${socket.id}`);
+    });
+  });
+
+  // FireFly event listening with Socket.IO broadcasting
   firefly.listen(
     {
       filter: {
@@ -523,13 +542,24 @@ async function init() {
       const eventName = event.blockchainEvent?.name;
       const eventOutput = event.blockchainEvent?.output;
       console.log(`${eventName}: ${JSON.stringify(eventOutput, null, 2)}`);
+      
+      // Broadcast blockchain events to all connected Socket.IO clients
+      if (eventName) {
+        io.emit(eventName, {
+          name: eventName,
+          output: eventOutput,
+          timestamp: Date.now()
+        });
+        console.log(`Broadcasting ${eventName} to all connected clients`);
+      }
     }
   );
 
-  // Start server
-  app.listen(config.PORT, () =>
-    console.log(`Kaleido DApp backend listening on port ${config.PORT}!`)
-  );
+  // Start server with Socket.IO
+  httpServer.listen(config.PORT, () => {
+    console.log(`Kaleido DApp backend listening on port ${config.PORT}!`);
+    console.log(`Socket.IO server ready for connections`);
+  });
 }
 
 init().catch((err) => {

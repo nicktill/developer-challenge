@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { io, Socket } from "socket.io-client";
 import "./App.css";
 
 interface Asset {
@@ -31,8 +32,8 @@ function App() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Helper functions
-  const getUserAddress = () => USER_ADDRESSES[currentUser];
-  const getUserDisplayName = () => USER_NAMES[currentUser];
+  const getUserAddress = useCallback(() => USER_ADDRESSES[currentUser], [currentUser]);
+  const getUserDisplayName = useCallback(() => USER_NAMES[currentUser], [currentUser]);
 
   const apiCall = async (endpoint: string, method = 'GET', body?: any) => {
     setLoading(true);
@@ -108,7 +109,7 @@ function App() {
     }
   };
 
-  const fetchAssetDetails = async (assetId: number): Promise<Asset | null> => {
+  const fetchAssetDetails = useCallback(async (assetId: number): Promise<Asset | null> => {
     try {
       const res = await fetch(`/api/asset/${assetId}`);
       const data = await res.json();
@@ -122,9 +123,9 @@ function App() {
       console.error(`Error fetching asset ${assetId}:`, err);
       return null;
     }
-  };
+  }, []);
 
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     try {
       const res = await fetch('/api/assets/count');
       const data = await res.json();
@@ -143,9 +144,9 @@ function App() {
     } catch (err) {
       console.error("Error fetching assets:", err);
     }
-  };
+  }, [fetchAssetDetails]);
 
-  const checkUserRegistration = async () => {
+  const checkUserRegistration = useCallback(async () => {
     try {
       const res = await fetch(`/api/user/${getUserAddress()}`);
       const data = await res.json();
@@ -162,19 +163,44 @@ function App() {
       setIsRegistered(false);
       setUserName("");
     }
-  };
+  }, [getUserAddress]);
 
   // Load data on mount and user change
   useEffect(() => {
     checkUserRegistration();
     fetchAssets();
-  }, [currentUser]);
+  }, [currentUser, checkUserRegistration, fetchAssets]);
 
-  // Auto-refresh assets every 3 seconds
+  // Socket.IO connection for real-time updates
   useEffect(() => {
-    const interval = setInterval(fetchAssets, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    console.log('Connecting to WebSocket server...');
+    const socket: Socket = io('http://localhost:3001');
+    
+    socket.on('connect', () => {
+      console.log('Connected to WebSocket server');
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('Disconnected from WebSocket server');
+    });
+
+    // Listen for blockchain events and refresh assets
+    const handleBlockchainEvent = (eventData: any) => {
+      console.log('Received blockchain event:', eventData.name);
+      fetchAssets(); // Refresh assets when any blockchain event occurs
+    };
+
+    socket.on('AssetRegistered', handleBlockchainEvent);
+    socket.on('AssetCheckedOut', handleBlockchainEvent);
+    socket.on('AssetReturned', handleBlockchainEvent);
+    socket.on('UserRegistered', handleBlockchainEvent);
+    
+    // Cleanup on unmount
+    return () => {
+      console.log('Cleaning up WebSocket connection...');
+      socket.disconnect();
+    };
+  }, [fetchAssets]);
 
   const isOwner = (asset: Asset) => 
     asset.currentHolder.toLowerCase() === getUserAddress().toLowerCase();
