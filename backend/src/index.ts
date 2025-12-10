@@ -30,7 +30,7 @@ const tokenApiName: string = `tokenApi-${config.VERSION}`;
 const assetFfiName: string = `assetLibraryFFI-${config.VERSION}`;
 const assetApiName: string = `assetLibraryApi-${config.VERSION}`;
 
-// Multi-user support
+// Multi-user support (hardcoded for demo purposes)
 const MEMBER_KEYS: Record<string, string> = {
   member0: "0xf56dfc48a146b9b4511465ecbf7f4b4e7308ce5a", // Peter
   member1: "0x58521a46882c3049f392a9022204e47201ca7ca4", // Madison
@@ -47,6 +47,15 @@ const userProfiles: Record<string, {
 const assetMetadata: Record<number, { 
   description: string; 
   category: string; 
+  location?: string;
+  createdBy: string;
+  createdAt: number;
+}> = {};
+
+// Temporary storage for pending asset metadata (keyed by FireFly transaction ID)
+const pendingAssetMetadata: Record<string, {
+  description: string;
+  category: string;
   location?: string;
   createdBy: string;
   createdAt: number;
@@ -141,7 +150,6 @@ app.post("/api/asset/register", async (req, res) => {
   try {
     const { userId, description, category, location } = req.body;
     const signingKey = MEMBER_KEYS[userId];
-    
     if (!signingKey) {
       return res.status(400).send({ error: "Invalid user ID" });
     }
@@ -152,10 +160,8 @@ app.post("/api/asset/register", async (req, res) => {
       key: signingKey,
     });
 
-    // Off-chain: Rich metadata storage
-    // Note: In production, you'd get the actual asset ID from the transaction
-    const estimatedAssetId = Date.now(); // Temporary ID for demo
-    assetMetadata[estimatedAssetId] = {
+    // Off-chain: Store metadata temporarily by transaction ID until we get the blockchain event
+    pendingAssetMetadata[fireflyRes.id] = {
       description: description || `Asset created by ${userId}`,
       category: category || "General",
       location: location || "Unknown",
@@ -163,9 +169,10 @@ app.post("/api/asset/register", async (req, res) => {
       createdAt: Date.now(),
     };
     
-    console.log(`Hybrid asset creation: ${userId} - On-chain: state, Off-chain: metadata`);
+    console.log(`Hybrid asset creation: ${userId} - On-chain: state, Off-chain: metadata (pending tx: ${fireflyRes.id})`);
     res.status(202).send({ id: fireflyRes.id });
   } catch (e: any) {
+    console.error('FireFly error in asset register:', e);
     res.status(500).send({ error: e.message });
   }
 });
@@ -175,7 +182,6 @@ app.post("/api/asset/checkout", async (req, res) => {
   try {
     const { userId, assetId } = req.body;
     const signingKey = MEMBER_KEYS[userId];
-    
     if (!signingKey) {
       return res.status(400).send({ error: "Invalid user ID" });
     }
@@ -188,6 +194,7 @@ app.post("/api/asset/checkout", async (req, res) => {
     console.log(`Asset ${assetId} checked out by ${userId}`);
     res.status(202).send({ id: fireflyRes.id });
   } catch (e: any) {
+    console.error('FireFly error in asset checkout:', e);
     res.status(500).send({ error: e.message });
   }
 });
@@ -197,7 +204,6 @@ app.post("/api/asset/return", async (req, res) => {
   try {
     const { userId, assetId } = req.body;
     const signingKey = MEMBER_KEYS[userId];
-    
     if (!signingKey) {
       return res.status(400).send({ error: "Invalid user ID" });
     }
@@ -210,6 +216,7 @@ app.post("/api/asset/return", async (req, res) => {
     console.log(`Asset ${assetId} returned by ${userId}`);
     res.status(202).send({ id: fireflyRes.id });
   } catch (e: any) {
+    console.error('FireFly error in asset return:', e);
     res.status(500).send({ error: e.message });
   }
 });
@@ -542,6 +549,29 @@ async function init() {
       const eventName = event.blockchainEvent?.name;
       const eventOutput = event.blockchainEvent?.output;
       console.log(`${eventName}: ${JSON.stringify(eventOutput, null, 2)}`);
+      
+      // Handle AssetRegistered event: move metadata from pending to final storage
+      if (eventName === 'AssetRegistered' && eventOutput) {
+        const assetId = parseInt(eventOutput.assetId);
+        const creatorAddress = eventOutput.registeredBy.toLowerCase();
+        
+        // Find pending metadata from the same creator (concurrency-safe)
+        const creatorEntries = Object.entries(pendingAssetMetadata).filter(
+          ([txId, metadata]) => metadata.createdBy.toLowerCase() === creatorAddress
+        );
+        
+        if (creatorEntries.length > 0) {
+          // Take the oldest pending from this specific creator (FIFO per user)
+          const sortedEntries = creatorEntries.sort((a, b) => a[1].createdAt - b[1].createdAt);
+          const [txId, metadata] = sortedEntries[0];
+          
+          assetMetadata[assetId] = metadata;
+          delete pendingAssetMetadata[txId];
+          console.log(`✅ Matched Asset #${assetId} with creator ${creatorAddress} (tx: ${txId})`);
+        } else {
+          console.warn(`⚠️ No pending metadata found for creator ${creatorAddress} - asset #${assetId}`);
+        }
+      }
       
       // Broadcast blockchain events to all connected Socket.IO clients
       if (eventName) {

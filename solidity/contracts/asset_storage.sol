@@ -58,12 +58,23 @@ contract AssetLibrary {
     error AssetNotAvailable(uint256 assetId);
     error AssetNotCheckedOut(uint256 assetId);
     error NotCurrentHolder(uint256 assetId, address caller);
+    error NotRegistered(address caller);
     
     // ============ Constructor ============
     
     constructor() {
         owner = msg.sender;
         nextAssetId = 1;
+    }
+    
+    // ============ Modifiers ============
+    
+    /**
+     * @notice Ensures only registered users can perform asset operations
+     */
+    modifier onlyRegistered() {
+        if (!isRegistered[msg.sender]) revert NotRegistered(msg.sender);
+        _;
     }
     
     // ============ External Functions ============
@@ -84,7 +95,7 @@ contract AssetLibrary {
      * @return assetId The ID of the newly registered asset
      * @dev Off-chain systems should store additional metadata (name, description, etc.)
      */
-    function registerAsset() external returns (uint256) {
+    function registerAsset() external onlyRegistered returns (uint256) {
         uint256 assetId = nextAssetId++;
         
         assets[assetId] = Asset({
@@ -104,7 +115,7 @@ contract AssetLibrary {
      * @notice Check out an available asset
      * @param assetId The ID of the asset to check out
      */
-    function checkOut(uint256 assetId) external {
+    function checkOut(uint256 assetId) external onlyRegistered {
         Asset storage asset = assets[assetId];
         
         if (!asset.exists) {
@@ -125,7 +136,7 @@ contract AssetLibrary {
      * @notice Return a currently checked-out asset
      * @param assetId The ID of the asset to return
      */
-    function returnAsset(uint256 assetId) external {
+    function returnAsset(uint256 assetId) external onlyRegistered {
         Asset storage asset = assets[assetId];
         
         if (!asset.exists) {
