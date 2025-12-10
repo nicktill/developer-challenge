@@ -248,6 +248,7 @@ app.get("/api/asset/:assetId/full", async (req, res) => {
     });
     
     // Get off-chain metadata (if available)
+    // stored in-memory for demo purposes, would use real DB (like SQL) for prod
     const metadata = assetMetadata[assetId];
     
     res.send({
