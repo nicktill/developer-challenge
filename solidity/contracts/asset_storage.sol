@@ -7,17 +7,18 @@ pragma solidity ^0.8.17;
  * @dev Users can register, create assets, check them out and return them
  */
 contract AssetLibrary {
-    
+
     // State variables
     uint256 private nextAssetId;
     address public immutable owner;
-    
-    // User mappings
+
+    // User mappings - only store registration status on-chain
+    // Full user profiles (name, email, department) stored off-chain for flexibility
     mapping(address => string) public userNames;
     mapping(address => bool) public isRegistered;
-    
-    // Asset data structure
-    
+
+    // Asset data structure - minimal on-chain state
+    // Metadata like description, category, location stored off-chain
     struct Asset {
         uint256 id;
         bool exists;
@@ -25,7 +26,7 @@ contract AssetLibrary {
         address currentHolder;
         uint256 checkoutTime;
     }
-    
+
     mapping(uint256 => Asset) public assets;
     
     // Events

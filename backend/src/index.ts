@@ -30,29 +30,38 @@ const tokenApiName: string = `tokenApi-${config.VERSION}`;
 const assetFfiName: string = `assetLibraryFFI-${config.VERSION}`;
 const assetApiName: string = `assetLibraryApi-${config.VERSION}`;
 
-// Multi-user support (hardcoded for demo purposes)
+// Demo: Hardcoded wallet addresses for two users (Peter and Madison)
+// In a real app, would integrate with proper wallet management/authentication like MetaMask 
 const MEMBER_KEYS: Record<string, string> = {
   member0: "0xf56dfc48a146b9b4511465ecbf7f4b4e7308ce5a", // Peter
   member1: "0x58521a46882c3049f392a9022204e47201ca7ca4", // Madison
 };
 
-// Off-chain storage for flexible data (in production: use proper database)
-const userProfiles: Record<string, { 
-  name: string; 
-  email?: string; 
+// ON-CHAIN:
+//   - Core business logic (permissions, asset state, ownership)
+//   - Provides immutability, auditability, and trust//
+// OFF-CHAIN (In-memory for demo, SQL/NoSQL DB would be best for actual Prod app):
+//   - Metadata (descriptions, emails, departments, locations)
+//   - Flexible schema (easy to add new fields without contract changes), cost effective storage
+const userProfiles: Record<string, {
+  name: string;
+  email?: string;
   department?: string;
   registrationTime: number;
 }> = {};
 
-const assetMetadata: Record<number, { 
-  description: string; 
-  category: string; 
+// Asset metadata storage (off-chain)
+const assetMetadata: Record<number, {
+  description: string;
+  category: string;
   location?: string;
   createdBy: string;
   createdAt: number;
 }> = {};
 
-// Temporary storage for pending asset metadata (keyed by FireFly transaction ID)
+// Temporary storage for pending asset metadata
+// Keyed by FireFly transaction ID until blockchain event confirms the asset ID
+// This handles the async nature of blockchain transactions
 const pendingAssetMetadata: Record<string, {
   description: string;
   category: string;
@@ -190,16 +199,26 @@ app.post("/api/asset/checkout", async (req, res) => {
       input: { assetId: Number(assetId) },
       key: signingKey,
     });
-    
+
     console.log(`Asset ${assetId} checked out by ${userId}`);
     res.status(202).send({ id: fireflyRes.id });
   } catch (e: any) {
     console.error('FireFly error in asset checkout:', e);
+
+    // Handle race condition: user registered but blockchain hasn't confirmed yet
+    // This happens when users try to interact too quickly after registration
+    // Real blockchains have confirmation times (2s block period in our demo)
+    if (e.message?.includes('NotRegistered')) {
+      return res.status(409).send({
+        error: "Registration still pending - please wait a moment for blockchain confirmation"
+      });
+    }
+
     res.status(500).send({ error: e.message });
   }
 });
 
-// Return asset (was "check in")
+// Return asset
 app.post("/api/asset/return", async (req, res) => {
   try {
     const { userId, assetId } = req.body;
@@ -212,11 +231,19 @@ app.post("/api/asset/return", async (req, res) => {
       input: { assetId: Number(assetId) },
       key: signingKey,
     });
-    
+
     console.log(`Asset ${assetId} returned by ${userId}`);
     res.status(202).send({ id: fireflyRes.id });
   } catch (e: any) {
     console.error('FireFly error in asset return:', e);
+
+    // Handle race condition (same as checkout - registration pending)
+    if (e.message?.includes('NotRegistered')) {
+      return res.status(409).send({
+        error: "Registration still pending - please wait a moment for blockchain confirmation"
+      });
+    }
+
     res.status(500).send({ error: e.message });
   }
 });
@@ -530,16 +557,19 @@ async function init() {
       }
     });
 
-  // Socket.IO connection handling
+  // Socket.IO provides real-time bidirectional communication between server and clients
+  // When blockchain events occur, we broadcast them to all connected clients
+  // This eliminates the need for polling and provides instant UI updates
   io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id}`);
-    
+
     socket.on('disconnect', () => {
       console.log(`Client disconnected: ${socket.id}`);
     });
   });
 
   // FireFly event listening with Socket.IO broadcasting
+  // This listener receives blockchain events from FireFly and broadcasts them to all connected clients
   firefly.listen(
     {
       filter: {
