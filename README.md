@@ -1,4 +1,17 @@
-# Developer Challenge
+# Developer Challenge - Asset Checkout System
+
+**Use Case**: A blockchain-based asset management system where users can register, create assets, and check them out/return them. Think of it like a digital library for company equipment (laptops, cameras, etc.) with full ownership tracking on-chain.
+
+**Key Features**:
+- Real-time updates via WebSockets
+- Clean UI with TailwindCSS and dark mode
+- Complete audit trail on blockchain
+- Multi-user support (Peter & Madison demo accounts)
+- Hybrid storage architecture (on-chain state + off-chain metadata)
+
+**[Complete Setup Instructions](./SETUP.md)** - Start here if you want to run the app from scratch!
+
+---
 
 Build a DApp on using FireFly.
 
